@@ -1,21 +1,12 @@
-import {
-  Alert,
-  Paper,
-  SimpleGrid,
-  Stack,
-  Table,
-  TableScrollContainer,
-  TableTbody,
-  Text,
-  Title,
-} from '@mantine/core'
+import { Stack, Table, TableScrollContainer, TableTbody, Text, Title } from '@mantine/core'
 import { requireUser } from '@/lib/dal'
 import { apiFetch } from '@/lib/api'
 import { TicketFilters } from '@/components/TicketFilters'
 import { TicketPagination } from '@/components/TicketPagination'
 import { TicketTableHeader } from '@/components/TicketTableHeader'
 import { TicketRow } from '@/components/TicketRow'
-import type { Category, Paginated, Ticket, TicketStats, TicketStatus, User } from '@/types'
+import { TicketStatsLive } from '@/components/TicketStatsLive'
+import type { Category, Paginated, Ticket, TicketStats, User } from '@/types'
 
 type SearchParams = {
   status?: string
@@ -27,14 +18,6 @@ type SearchParams = {
   page?: string
 }
 
-const STATUSES: TicketStatus[] = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED']
-const STATUS_LABELS: Record<TicketStatus, string> = {
-  OPEN: 'Abertos',
-  IN_PROGRESS: 'Em andamento',
-  RESOLVED: 'Resolvidos',
-  CLOSED: 'Fechados',
-}
-
 export default async function TicketsPage({
   searchParams,
 }: {
@@ -44,45 +27,36 @@ export default async function TicketsPage({
   const params = await searchParams
   const isAdmin = user.role === 'ADMIN'
 
-  const [ticketsResult, categoriesResult, requestersResult, statsResult, highPriorityOpen] =
-    await Promise.all([
-      apiFetch<Paginated<Ticket>>('/tickets', {
-        token,
-        searchParams: {
-          status: params.status,
-          priority: params.priority,
-          categoryId: params.categoryId,
-          requesterId: params.requesterId,
-          search: params.search,
-          page: params.page,
-          order: params.order ?? '-createdAt',
-        },
-      }),
-      apiFetch<Paginated<Category>>('/categories', { token, searchParams: { limit: 100 } }),
-      isAdmin
-        ? apiFetch<Paginated<User>>('/users', { token, searchParams: { limit: 100 } })
-        : Promise.resolve(null),
-      // Contagem por status + percentual vêm prontos da API — os cards de
-      // resumo só exibem, não recalculam nada (e por isso já refletem os
-      // filtros de busca/prioridade/categoria/solicitante ativos).
-      apiFetch<{ data: TicketStats }>('/tickets/stats', {
-        token,
-        searchParams: {
-          priority: params.priority,
-          categoryId: params.categoryId,
-          requesterId: params.requesterId,
-          search: params.search,
-        },
-      }),
-      apiFetch<Paginated<Ticket>>('/tickets', {
-        token,
-        searchParams: { status: 'OPEN', priority: 'HIGH', limit: 1 },
-      }),
-    ])
-
-  const counts = Object.fromEntries(
-    statsResult.data.statuses.map((entry) => [entry.status, entry])
-  ) as Record<TicketStatus, TicketStats['statuses'][number]>
+  const [ticketsResult, categoriesResult, requestersResult, statsResult] = await Promise.all([
+    apiFetch<Paginated<Ticket>>('/tickets', {
+      token,
+      searchParams: {
+        status: params.status,
+        priority: params.priority,
+        categoryId: params.categoryId,
+        requesterId: params.requesterId,
+        search: params.search,
+        page: params.page,
+        order: params.order ?? '-createdAt',
+      },
+    }),
+    apiFetch<Paginated<Category>>('/categories', { token, searchParams: { limit: 100 } }),
+    isAdmin
+      ? apiFetch<Paginated<User>>('/users', { token, searchParams: { limit: 100 } })
+      : Promise.resolve(null),
+    // Contagem por status/prioridade + percentual + chamados ALTA/ABERTO vêm
+    // prontos da API — os cards só exibem, não recalculam nada. O mesmo
+    // endpoint alimenta o indicador ao vivo (`TicketStatsLive`, via polling).
+    apiFetch<{ data: TicketStats }>('/tickets/stats', {
+      token,
+      searchParams: {
+        priority: params.priority,
+        categoryId: params.categoryId,
+        requesterId: params.requesterId,
+        search: params.search,
+      },
+    }),
+  ])
 
   return (
     <Stack gap="lg">
@@ -93,33 +67,7 @@ export default async function TicketsPage({
         </Text>
       </div>
 
-      <SimpleGrid cols={{ base: 2, sm: 4 }}>
-        {STATUSES.map((status) => (
-          <Paper key={status} withBorder shadow="xs" p="md" radius="md">
-            <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-              {STATUS_LABELS[status]}
-            </Text>
-            <Text size="xl" fw={700}>
-              {counts[status]?.count ?? 0}{' '}
-              <Text span size="sm" fw={500} c="dimmed">
-                (
-                {(counts[status]?.percentage ?? 0).toLocaleString('pt-BR', {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
-                %)
-              </Text>
-            </Text>
-          </Paper>
-        ))}
-      </SimpleGrid>
-
-      {highPriorityOpen.meta.total > 0 && (
-        <Alert color="red" title="Atenção" variant="light">
-          {highPriorityOpen.meta.total} chamado(s) de prioridade ALTA em aberto aguardando
-          atendimento.
-        </Alert>
-      )}
+      <TicketStatsLive initialStats={statsResult.data} />
 
       <TicketFilters categories={categoriesResult.data} requesters={requestersResult?.data ?? []} />
 

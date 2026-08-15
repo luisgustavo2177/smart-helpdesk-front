@@ -86,9 +86,19 @@ export type Paginated<T> = {
 
 export type TicketStats = {
   total: number
+  generatedAt: string
   statuses: Array<{
     status: TicketStatus
     count: number
     percentage: number
   }>
+  priorities: Array<{
+    priority: TicketPriority
+    count: number
+    percentage: number
+  }>
+  highPriorityOpen: {
+    count: number
+    tickets: Array<{ id: number; title: string; createdAt: string }>
+  }
 }
